@@ -1,9 +1,8 @@
 streamlit
 PyPDF2
-python-dotenv==1.0.0
-requests==2.31.0
-beautifulsoup4==4.12.2
-faiss-cpu==1.7.4
+python-dotenv
+requests
+faiss-cpu
 langchain==0.3.27
 langchain-openai==0.3.35
 langchain-text-splitters==0.3.11
