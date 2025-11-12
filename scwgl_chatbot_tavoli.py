@@ -27,14 +27,14 @@ WALTON_HERSHAM_LOGO_PATH = "walton_hersham_logo.png"
 # ---------------------------------------------------------------------
 col1, col2, col3 = st.columns([1, 3, 1])
 with col1:
-    st.image(SCWGL_LOGO_PATH, width=80)
+    st.image(SCWGL_LOGO_PATH, width=60)
 with col2:
     st.markdown(
-        "<h1 style='color: red; text-align: center;'>Surrey County Women and Girls Football League Chatbot</h1>",
+        "<h1 style='color: red; text-align: center; border-radius: 5px; max-width:100%; word-wrap: break-word;'>SCWGL Football</h1>",
         unsafe_allow_html=True,
     )
 with col3:
-    st.image(WALTON_HERSHAM_LOGO_PATH, width=130)
+    st.image(WALTON_HERSHAM_LOGO_PATH, width=60)
 
 # ---------------------------------------------------------------------
 # 📚 Sidebar: File Upload
