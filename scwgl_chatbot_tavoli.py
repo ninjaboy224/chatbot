@@ -8,9 +8,9 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.chains import RetrievalQA
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.tools.tavily_search import TavilySearchResults
+from langchain.vectorstores.faiss import FAISS
 
 # ---------------------------------------------------------------------
 # 🧩 Setup and Environment
