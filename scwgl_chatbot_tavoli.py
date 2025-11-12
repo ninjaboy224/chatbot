@@ -4,12 +4,12 @@ from PyPDF2 import PdfReader
 from dotenv import load_dotenv
 
 # LangChain 0.3.x imports
-from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.chains import RetrievalQA
 from langchain_community.vectorstores import FAISS
 from langchain_community.tools.tavily_search.tool import TavilySearchResults
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 # ---------------------------------------------------------------------
 # 🧩 Setup and Environment
