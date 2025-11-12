@@ -1,144 +1,165 @@
 import streamlit as st
 import os
 from PyPDF2 import PdfReader
+from dotenv import load_dotenv
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
-from langchain.chains.question_answering import load_qa_chain
+from langchain.chains import RetrievalQA
 from langchain_community.chat_models import ChatOpenAI
-from langchain.agents import initialize_agent, Tool, AgentType
 from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain.memory import ConversationBufferWindowMemory
-from dotenv import load_dotenv
 
-# Load environment variables
+# ---------------------------------------------------------------------
+# 🧩 Setup and Environment
+# ---------------------------------------------------------------------
 load_dotenv()
-
-# Load API key from environment variable
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-# Streamlit UI Configuration
 st.set_page_config(page_title="SCWGL Chatbot", layout="wide")
 
-# Image Paths
 SCWGL_LOGO_PATH = "scwgl_image.jpeg"
 WALTON_HERSHAM_LOGO_PATH = "walton_hersham_logo.png"
 
-# Layout with two logos
+# ---------------------------------------------------------------------
+# 🎨 Page Layout with Logos
+# ---------------------------------------------------------------------
 col1, col2, col3 = st.columns([1, 3, 1])
-
 with col1:
     st.image(SCWGL_LOGO_PATH, width=80)
-
 with col2:
     st.markdown(
         "<h1 style='color: red; text-align: center;'>Surrey County Women and Girls Football League Chatbot</h1>",
-        unsafe_allow_html=True)
-
+        unsafe_allow_html=True,
+    )
 with col3:
     st.image(WALTON_HERSHAM_LOGO_PATH, width=130)
 
-# Sidebar for file upload
+# ---------------------------------------------------------------------
+# 📚 Sidebar: File Upload
+# ---------------------------------------------------------------------
 with st.sidebar:
     st.title("Your Documents")
-    files = st.file_uploader("Upload PDF files and start asking questions", type="pdf", accept_multiple_files=True)
+    files = st.file_uploader(
+        "Upload PDF files and start asking questions",
+        type="pdf",
+        accept_multiple_files=True,
+    )
 
-# Initialize session state for chat history
+# ---------------------------------------------------------------------
+# 💬 Session Initialization
+# ---------------------------------------------------------------------
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-# Extract text from PDFs
+if "vector_store" not in st.session_state:
+    st.session_state.vector_store = None
+
+# ---------------------------------------------------------------------
+# 📖 Extract Text from PDFs
+# ---------------------------------------------------------------------
 text = ""
 if files:
     for file in files:
         pdf_reader = PdfReader(file)
         for page in pdf_reader.pages:
-            extracted_text = page.extract_text() or ""
-            text += extracted_text + "\n"
+            page_text = page.extract_text() or ""
+            text += page_text + "\n"
 
-# SCWGL Context
+if not text.strip() and files:
+    st.warning("No text could be extracted from the uploaded PDFs. Check your files.")
+
+# ---------------------------------------------------------------------
+# 🧭 SCWGL Context
+# ---------------------------------------------------------------------
 scwgl_context = """
 The Surrey County Women and Girls Football League (SCWGL) is an organization that manages women's and girls' football leagues in Surrey, UK. 
 It provides fixtures, regulations, news, and support for teams and clubs participating in the league. 
 All queries should be answered in the context of SCWGL, focusing on topics such as team registrations, league rules, fixtures, results, policies, FAQs, and club information.
 """
 
-# Initialize vector_store as None
-vector_store = None
+# ---------------------------------------------------------------------
+# 🧩 Create or Load Vector Store
+# ---------------------------------------------------------------------
+if text and not st.session_state.vector_store:
+    with st.spinner("Processing and indexing documents..."):
+        full_text = scwgl_context + "\n" + text
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+        chunks = text_splitter.split_text(full_text)
 
-# Initialize the LLM (GPT-4 for conversational responses)
-llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, temperature=0, model_name="gpt-4")
+        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+        st.session_state.vector_store = FAISS.from_texts(chunks, embeddings)
+        st.success("Documents indexed and ready for search!")
 
-# Combine documents with context if PDFs are uploaded
-if text:
-    text = scwgl_context + text  # Prepend SCWGL context
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
-    chunks = text_splitter.split_text(text)
-    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-    vector_store = FAISS.from_texts(chunks, embeddings)
-
-# Define a safe function for SCWGL document search
-def search_scwgl_docs(query):
-    """Search SCWGL document vector store if available."""
-    if vector_store:
-        docs = vector_store.similarity_search(query)
-        if docs:
-            return "\n".join([doc.page_content for doc in docs])
-        return "No relevant SCWGL document found."
-    return "No SCWGL documents uploaded yet."
-
-scwgl_tool = Tool(
-    name="SCWGL Document Search",
-    func=search_scwgl_docs,
-    description="Use this tool to search SCWGL documents and league regulations."
+# ---------------------------------------------------------------------
+# 🧠 Initialize LLM and Memory
+# ---------------------------------------------------------------------
+llm = ChatOpenAI(
+    openai_api_key=OPENAI_API_KEY,
+    temperature=0,
+    model_name="gpt-4"
 )
 
-tavily_tool = TavilySearchResults()  # External search replaces web scraping
+memory = ConversationBufferWindowMemory(k=5)
 
-# Initialize the agent with SCWGL search first, then Tavily
+# ---------------------------------------------------------------------
+# 🔍 Define RetrievalQA Chain
+# ---------------------------------------------------------------------
+vector_store = st.session_state.vector_store
+qa_chain = None
+if vector_store:
+    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+    qa_chain = RetrievalQA.from_chain_type(
+        llm=llm,
+        retriever=retriever,
+        chain_type="stuff"
+    )
 
-# Create an agent memory to limit chat history tokens
-memory = ConversationBufferWindowMemory(k=5)  # Keep only the last 5 interactions
+# ---------------------------------------------------------------------
+# 🌐 Tavily Fallback Search Tool
+# ---------------------------------------------------------------------
+tavily_tool = TavilySearchResults()
 
-# Define the agent with limited memory
-agent = initialize_agent(
-    [scwgl_tool, tavily_tool],
-    llm,
-    agent_type=AgentType.ZERO_SHOT_REACT_DESCRIPTION,
-    verbose=True,
-    memory=memory  # Ensures conversation history is managed
-)
+def fallback_web_search(query):
+    """Use Tavily web search if no local SCWGL info found."""
+    try:
+        results = tavily_tool.run(query)
+        if results:
+            return results
+    except Exception as e:
+        return f"Tavily search failed: {e}"
+    return "No web results found."
 
-# User input for queries
+# ---------------------------------------------------------------------
+# 💬 User Input
+# ---------------------------------------------------------------------
 user_question = st.text_input("Type your question here")
+
 if user_question:
-    # Formulate the enhanced prompt
-    prompt_with_context = f"""
-    You are a chatbot for the Surrey County Women and Girls Football League (SCWGL). 
-    Always assume that the user is asking about SCWGL unless explicitly stated otherwise.
+    response = None
 
-    {scwgl_context}
+    # Step 1: Try answering from uploaded documents
+    if qa_chain:
+        answer = qa_chain.run(user_question)
+        if answer and "No relevant" not in answer:
+            response = answer
 
-    Chat History:
-    {st.session_state.chat_history}
+    # Step 2: Fallback to web if nothing found locally
+    if not response:
+        response = fallback_web_search(user_question)
 
-    User: {user_question}
-    Assistant:
-    """
-
-    # Invoke the agent
-    response = agent.run(prompt_with_context)
-
-    # Store chat history for display
+    # Step 3: Display answer
     st.session_state.chat_history.insert(0, f"Assistant: {response}")
     st.session_state.chat_history.insert(0, f"User: {user_question}")
 
-    st.write(response)
+    st.markdown(f"**Answer:** {response}")
 
-# Display Chat History in Reverse Order
+# ---------------------------------------------------------------------
+# 📜 Chat History Display
+# ---------------------------------------------------------------------
 if st.session_state.chat_history:
     with st.expander("Chat History"):
         for message in st.session_state.chat_history:
             st.text(message)
 else:
-    st.warning("Enter a question to proceed.")
+    st.info("Upload PDFs or type a question to get started.")
