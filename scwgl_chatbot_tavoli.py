@@ -46,6 +46,13 @@ with st.sidebar:
         accept_multiple_files=True,
     )
 
+# Auto-load PDFs from folder
+auto_pdf_folder = "pdfs"
+if os.path.exists(auto_pdf_folder):
+    for filename in os.listdir(auto_pdf_folder):
+        if filename.endswith(".pdf"):
+            files = files + [os.path.join(auto_pdf_folder, filename)] if files else [os.path.join(auto_pdf_folder, filename)]
+
 # ---------------------------------------------------------------------
 # 💬 Session Initialization
 # ---------------------------------------------------------------------
