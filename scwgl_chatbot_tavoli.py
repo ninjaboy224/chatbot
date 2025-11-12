@@ -6,12 +6,10 @@ from dotenv import load_dotenv
 # LangChain 0.3.x imports
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.vectorstores import FAISS
-from langchain.chains.question_answering import load_qa_chain
-from langchain.agents import initialize_agent, Tool, AgentType
 from langchain.memory import ConversationBufferWindowMemory
-from langchain.tools.tavily_search import TavilySearchResults
 from langchain.chains import RetrievalQA
+from langchain_community.vectorstores import FAISS
+from langchain_community.tools.tavily_search.tool import TavilySearchResults
 
 # ---------------------------------------------------------------------
 # 🧩 Setup and Environment
