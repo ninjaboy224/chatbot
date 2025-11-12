@@ -1,175 +1,98 @@
 import streamlit as st
 import os
+import glob
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
-
-# LangChain 0.3.x imports
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.memory import ConversationBufferWindowMemory
-from langchain.chains import RetrievalQA
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.memory import ConversationBufferWindowMemory
-from langchain.tools.tavily_search import TavilySearchResults
-from langchain.vectorstores.faiss import FAISS
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
 
-# ---------------------------------------------------------------------
-# 🧩 Setup and Environment
-# ---------------------------------------------------------------------
+# --- Load environment variables ---
 #load_dotenv()
 #OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
 
+# --- Streamlit page config ---
 st.set_page_config(page_title="SCWGL Chatbot", layout="wide")
 
+# --- Responsive layout: two logos + title ---
 SCWGL_LOGO_PATH = "scwgl_image.jpeg"
 WALTON_HERSHAM_LOGO_PATH = "walton_hersham_logo.png"
 
-# ---------------------------------------------------------------------
-# 🎨 Page Layout with Logos
-# ---------------------------------------------------------------------
 col1, col2, col3 = st.columns([1, 3, 1])
-with col1:
-    st.image(SCWGL_LOGO_PATH, width=60)
+with col1: st.image(SCWGL_LOGO_PATH, width=60)
 with col2:
-    st.markdown(
-        "<h1 style='color: red; text-align: center; border-radius: 5px; max-width:100%; word-wrap: break-word;'>SCWGL Football</h1>",
-        unsafe_allow_html=True,
-    )
-with col3:
-    st.image(WALTON_HERSHAM_LOGO_PATH, width=60)
+    st.markdown("<h1 style='color:red; text-align:center; font-size:20px;'>SCWGL Chatbot</h1>", unsafe_allow_html=True)
+with col3: st.image(WALTON_HERSHAM_LOGO_PATH, width=120)
 
-# ---------------------------------------------------------------------
-# 📚 Sidebar: File Upload
-# ---------------------------------------------------------------------
+# --- Sidebar for PDF uploads ---
 with st.sidebar:
-    st.title("Your Documents")
-    files = st.file_uploader(
-        "Upload PDF files and start asking questions",
-        type="pdf",
-        accept_multiple_files=True,
-    )
+    st.title("Upload PDFs")
+    uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
 
-# Autoload PDFs from folder
-auto_pdf_folder = "pdfs"
-if os.path.exists(auto_pdf_folder):
-    for filename in os.listdir(auto_pdf_folder):
-        if filename.endswith(".pdf"):
-            files = files + [os.path.join(auto_pdf_folder, filename)] if files else [os.path.join(auto_pdf_folder, filename)]
-
-# ---------------------------------------------------------------------
-# 💬 Session Initialization
-# ---------------------------------------------------------------------
+# --- Session state ---
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
 if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
 
-# ---------------------------------------------------------------------
-# 📖 Extract Text from PDFs
-# ---------------------------------------------------------------------
-text = ""
-if files:
-    for file in files:
-        pdf_reader = PdfReader(file)
-        for page in pdf_reader.pages:
-            page_text = page.extract_text() or ""
-            text += page_text + "\n"
+# --- Preload PDFs from repo ---
+preloaded_files = glob.glob("pdfs/*.pdf")
+all_pdfs = preloaded_files + (uploaded_files or [])
 
-if not text.strip() and files:
-    st.warning("No text could be extracted from the uploaded PDFs. Check your files.")
+pdf_text = ""
+for file in all_pdfs:
+    pdf_reader = PdfReader(file)
+    for page in pdf_reader.pages:
+        pdf_text += page.extract_text() or ""
 
-# ---------------------------------------------------------------------
-# 🧭 SCWGL Context
-# ---------------------------------------------------------------------
+# --- SCWGL context ---
 scwgl_context = """
-The Surrey County Women and Girls Football League (SCWGL) is an organization that manages women's and girls' football leagues in Surrey, UK. 
-It provides fixtures, regulations, news, and support for teams and clubs participating in the league. 
-All queries should be answered in the context of SCWGL, focusing on topics such as team registrations, league rules, fixtures, results, policies, FAQs, and club information.
+The Surrey County Women and Girls Football League (SCWGL) manages women's and girls' football leagues in Surrey, UK.
+It provides fixtures, regulations, news, and support for teams and clubs participating in the league.
+All queries should be answered in the context of SCWGL, including team registrations, league rules, fixtures, results, policies, FAQs, and club info.
 """
 
-# ---------------------------------------------------------------------
-# 🧩 Create or Load Vector Store
-# ---------------------------------------------------------------------
-if text and not st.session_state.vector_store:
-    with st.spinner("Processing and indexing documents..."):
-        full_text = scwgl_context + "\n" + text
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
-        chunks = text_splitter.split_text(full_text)
+# --- Create vector store ---
+if pdf_text.strip():
+    text = scwgl_context + "\n" + pdf_text
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
+    chunks = text_splitter.split_text(text)
+    embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
+    st.session_state.vector_store = FAISS.from_texts(chunks, embeddings)
 
-        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-        st.session_state.vector_store = FAISS.from_texts(chunks, embeddings)
-        st.success("Documents indexed and ready for search!")
+# --- Initialize LLM ---
+llm = ChatOpenAI(openai_api_key=OPENAI_API_KEY, temperature=0, model_name="gpt-4")
 
-# ---------------------------------------------------------------------
-# 🧠 Initialize LLM and Memory
-# ---------------------------------------------------------------------
-llm = ChatOpenAI(
-    openai_api_key=OPENAI_API_KEY,
-    temperature=0,
-    model_name="gpt-4"
-)
-
-memory = ConversationBufferWindowMemory(k=5)
-
-# ---------------------------------------------------------------------
-# 🔍 Define RetrievalQA Chain
-# ---------------------------------------------------------------------
-vector_store = st.session_state.vector_store
+# --- RetrievalQA chain ---
 qa_chain = None
-if vector_store:
-    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
-    qa_chain = RetrievalQA.from_chain_type(
-        llm=llm,
-        retriever=retriever,
-        chain_type="stuff"
-    )
+if st.session_state.vector_store:
+    retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 3})
+    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type="stuff")
 
-# ---------------------------------------------------------------------
-# 🌐 Tavily Fallback Search Tool
-# ---------------------------------------------------------------------
-tavily_tool = TavilySearchResults()
+# --- User input ---
+user_question = st.text_input("Ask a question about SCWGL")
+if user_question and qa_chain:
+    response = qa_chain.run(user_question)
 
-def fallback_web_search(query):
-    """Use Tavily web search if no local SCWGL info found."""
-    try:
-        results = tavily_tool.run(query)
-        if results:
-            return results
-    except Exception as e:
-        return f"Tavily search failed: {e}"
-    return "No web results found."
+    # Only store last question/answer
+    st.session_state.chat_history = [f"User: {user_question}", f"Assistant: {response}"]
 
-# ---------------------------------------------------------------------
-# 💬 User Input
-# ---------------------------------------------------------------------
-user_question = st.text_input("Type your question here")
+    # Display response styled for mobile
+    st.markdown(f"""
+        <div style='background-color:black; color:gold; padding:10px; border-radius:5px; word-wrap:break-word;'>
+            {response}
+        </div>
+    """, unsafe_allow_html=True)
 
-if user_question:
-    response = None
-
-    # Step 1: Try answering from uploaded documents
-    if qa_chain:
-        answer = qa_chain.run(user_question)
-        if answer and "No relevant" not in answer:
-            response = answer
-
-    # Step 2: Fallback to web if nothing found locally
-    if not response:
-        response = fallback_web_search(user_question)
-
-    # Step 3: Display answer
-    st.session_state.chat_history.insert(0, f"Assistant: {response}")
-    st.session_state.chat_history.insert(0, f"User: {user_question}")
-
-    st.markdown(f"**Answer:** {response}")
-
-# ---------------------------------------------------------------------
-# 📜 Chat History Display
-# ---------------------------------------------------------------------
+# --- Chat history ---
 if st.session_state.chat_history:
     with st.expander("Chat History"):
-        for message in st.session_state.chat_history:
-            st.text(message)
-else:
-    st.info("Upload PDFs or type a question to get started.")
+        for msg in st.session_state.chat_history:
+            st.markdown(f"""
+                <div style='background-color:black; color:gold; padding:5px; border-radius:5px; word-wrap:break-word;'>
+                    {msg}
+                </div>
+            """, unsafe_allow_html=True)
