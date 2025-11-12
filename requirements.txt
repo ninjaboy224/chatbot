@@ -3,7 +3,7 @@ PyPDF2
 python-dotenv
 beautifulsoup4
 requests
-langchain
+langchain==0.2.15
 langchain-community
 langchain-openai
 langchain-text-splitters
