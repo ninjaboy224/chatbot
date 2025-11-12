@@ -7,9 +7,10 @@ from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain.memory import ConversationBufferWindowMemory
 from langchain.chains import RetrievalQA
-from langchain_community.vectorstores import FAISS
-from langchain_community.tools.tavily_search.tool import TavilySearchResults
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain.vectorstores import FAISS
+from langchain.memory import ConversationBufferWindowMemory
+from langchain.tools.tavily_search import TavilySearchResults
 
 # ---------------------------------------------------------------------
 # 🧩 Setup and Environment
