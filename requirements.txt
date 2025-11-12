@@ -5,4 +5,4 @@ openai
 langchain
 langchain-core
 langchain-openai
-langchain-text-splitters
+langchain-text-splitter
