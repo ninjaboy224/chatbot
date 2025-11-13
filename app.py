@@ -3,16 +3,16 @@ import os
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
 
-# LangChain 0.3.x imports
+# LangChain >=0.3.x imports
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.chains import RetrievalQA
+from langchain_community.chains import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.vectorstores import FAISS
 from langchain.utilities import GoogleSearchAPIWrapper
 
 # ---------------------------------------------------------------------
-# ⚙️ Environment Setup
+# ⚙️ Setup Environment
 # ---------------------------------------------------------------------
 load_dotenv()
 
@@ -34,7 +34,7 @@ with col2:
         unsafe_allow_html=True,
     )
 with col3:
-    st.image("walton_hersham_logo.png", width=80)
+    st.image("walton_hersham_logo.png", width=60)
 
 st.markdown("---")
 
@@ -57,12 +57,16 @@ if os.path.exists(pdf_folder):
             files = files + [os.path.join(pdf_folder, filename)] if files else [os.path.join(pdf_folder, filename)]
 
 # ---------------------------------------------------------------------
-# 💬 Session State
+# 💬 Session State Initialization
 # ---------------------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
 if "vector_store" not in st.session_state:
     st.session_state.vector_store = None
+
+if "user_input" not in st.session_state:
+    st.session_state.user_input = ""
 
 # ---------------------------------------------------------------------
 # 📖 Extract PDF Text
@@ -119,30 +123,44 @@ if st.session_state.vector_store:
     qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type="stuff")
 
 # ---------------------------------------------------------------------
-# 💬 Chat Interface (Replace old chat code with this)
+# 💬 Callback for user input
 # ---------------------------------------------------------------------
-# Ensure session state exists
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+def handle_user_input():
+    # Append user message immediately
+    st.session_state.messages.append({"role": "user", "content": st.session_state.user_input})
 
-# Display all messages first
+    # Generate assistant response
+    response = None
+    if qa_chain:
+        local_answer = qa_chain.run(st.session_state.user_input)
+        if local_answer and "no relevant" not in local_answer.lower():
+            response = local_answer
+
+    # Fallback to Google search
+    if not response:
+        try:
+            response = google_search.run(st.session_state.user_input)
+        except Exception as e:
+            response = f"Web search failed: {e}"
+
+    st.session_state.messages.append({"role": "assistant", "content": response})
+
+    # Clear input box
+    st.session_state.user_input = ""
+
+# ---------------------------------------------------------------------
+# 💬 Chat Interface (Mobile-friendly)
+# ---------------------------------------------------------------------
+st.markdown("### 💬 Chat with SCWGL Assistant")
+
+# Display previous messages
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Chat input (outside any condition)
-user_input = st.chat_input("Ask your question...")
-
-if user_input:
-    # Append user message immediately
-    st.session_state.messages.append({"role": "user", "content": user_input})
-
-    # Display user message
-    with st.chat_message("user"):
-        st.markdown(user_input)
-
-    # Generate assistant response
-    with st.chat_message("assistant"):
-        response = qa_chain.run(user_input) if qa_chain else "No local answer found"
-        st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+# Input box with callback
+st.text_input(
+    "Ask your question...",
+    key="user_input",
+    on_change=handle_user_input
+)
