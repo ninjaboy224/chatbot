@@ -1,11 +1,7 @@
 streamlit
+langchain>=0.3.6
+langchain-openai
+langchain-community
 PyPDF2
 python-dotenv
-requests
 faiss-cpu
-langchain
-langchain-openai
-langchain-text-splitters==0.3.11
-beautifulsoup4
-openai
-langchain-community

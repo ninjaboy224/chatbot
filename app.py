@@ -2,16 +2,17 @@ import streamlit as st
 import os
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+
+# LangChain 0.3.x imports
+from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain.chains import RetrievalQA
-from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.utilities import GoogleSearchAPIWrapper
-from langchain_community.vectorstores import FAISS
-from langchain_community.chat_message_histories import StreamlitChatMessageHistory
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.memory import ConversationBufferWindowMemory
+from langchain_community.vectorstores import FAISS
+from langchain.utilities import GoogleSearchAPIWrapper
 
 # ---------------------------------------------------------------------
-# ⚙️ Setup and Environment
+# ⚙️ Environment Setup
 # ---------------------------------------------------------------------
 load_dotenv()
 
@@ -33,12 +34,12 @@ with col2:
         unsafe_allow_html=True,
     )
 with col3:
-    st.image("walton_hersham_logo.png", width=60)
+    st.image("walton_hersham_logo.png", width=80)
 
 st.markdown("---")
 
 # ---------------------------------------------------------------------
-# 📚 Sidebar: File Upload
+# 📚 Sidebar: Upload PDFs
 # ---------------------------------------------------------------------
 with st.sidebar:
     st.title("📄 Your Documents")
@@ -56,7 +57,7 @@ if os.path.exists(pdf_folder):
             files = files + [os.path.join(pdf_folder, filename)] if files else [os.path.join(pdf_folder, filename)]
 
 # ---------------------------------------------------------------------
-# 💬 Session State Initialization
+# 💬 Session State
 # ---------------------------------------------------------------------
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -77,7 +78,7 @@ if files:
             st.warning(f"Could not read {file}: {e}")
 
 # ---------------------------------------------------------------------
-# 🧭 Context
+# 🧭 SCWGL Context
 # ---------------------------------------------------------------------
 scwgl_context = """
 The Surrey County Women and Girls Football League (SCWGL) manages women's and girls' football leagues in Surrey, UK.
@@ -86,7 +87,7 @@ Questions should be answered in this SCWGL context.
 """
 
 # ---------------------------------------------------------------------
-# 🧩 Create or Load Vector Store
+# 🧩 Vector Store (FAISS)
 # ---------------------------------------------------------------------
 if text and not st.session_state.vector_store:
     with st.spinner("📚 Indexing your documents..."):
@@ -95,18 +96,19 @@ if text and not st.session_state.vector_store:
 
         embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
         st.session_state.vector_store = FAISS.from_texts(chunks, embeddings)
-        st.success("✅ Documents indexed and ready!")
+        st.success("✅ Documents indexed!")
 
 # ---------------------------------------------------------------------
-# 🧠 LLM and Google Search Setup
+# 🧠 LLM & Google Search
 # ---------------------------------------------------------------------
 llm = ChatOpenAI(
     openai_api_key=OPENAI_API_KEY,
     model_name="gpt-4o-mini",
     temperature=0.2,
 )
-google_search = GoogleSearchAPIWrapper()
+
 memory = ConversationBufferWindowMemory(k=5)
+google_search = GoogleSearchAPIWrapper()
 
 # ---------------------------------------------------------------------
 # 🔍 RetrievalQA Chain
@@ -117,41 +119,30 @@ if st.session_state.vector_store:
     qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type="stuff")
 
 # ---------------------------------------------------------------------
-# 💬 Chat Interface (ChatGPT-style)
+# 💬 Chat Interface (Replace old chat code with this)
 # ---------------------------------------------------------------------
-st.markdown("### 💬 Chat with SCWGL Assistant")
+# Ensure session state exists
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# Display chat history using Streamlit’s native chat UI
+# Display all messages first
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Chat input field
-if prompt := st.chat_input("Ask about SCWGL, fixtures, or upload-related queries..."):
+# Chat input (outside any condition)
+user_input = st.chat_input("Ask your question...")
+
+if user_input:
+    # Append user message immediately
+    st.session_state.messages.append({"role": "user", "content": user_input})
+
     # Display user message
-    st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.markdown(prompt)
+        st.markdown(user_input)
 
-    # Process the user input
+    # Generate assistant response
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
-            response = None
-
-            # Step 1: Try to answer from uploaded documents
-            if qa_chain:
-                local_answer = qa_chain.run(prompt)
-                if local_answer and "no relevant" not in local_answer.lower():
-                    response = local_answer
-
-            # Step 2: Fallback to Google Search
-            if not response:
-                try:
-                    response = google_search.run(prompt)
-                except Exception as e:
-                    response = f"Web search failed: {e}"
-
-            st.markdown(response)
-
-    # Save assistant message
-    st.session_state.messages.append({"role": "assistant", "content": response})
+        response = qa_chain.run(user_input) if qa_chain else "No local answer found"
+        st.markdown(response)
+        st.session_state.messages.append({"role": "assistant", "content": response})
