@@ -1,166 +1,162 @@
 import streamlit as st
-import os
-from PyPDF2 import PdfReader
-from dotenv import load_dotenv
+from pathlib import Path
 
-# LangChain >=0.3.x imports
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.chains.retrieval_qa.base import RetrievalQA
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.memory import ConversationBufferWindowMemory
+# LangChain imports
+from langchain_community.document_loaders import PyPDFDirectoryLoader
 from langchain_community.vectorstores import FAISS
-from langchain.utilities import GoogleSearchAPIWrapper
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain.chains import ConversationalRetrievalChain
+from langchain_openai import ChatOpenAI
+from langchain_community.utilities import GoogleSerperAPIWrapper
 
 # ---------------------------------------------------------------------
-# ⚙️ Setup Environment
+# ⚙️ Streamlit Page Setup
 # ---------------------------------------------------------------------
-load_dotenv()
-
-st.set_page_config(page_title="SCWGL Chatbot", layout="centered")
-
-OPENAI_API_KEY = st.secrets["OPENAI_API_KEY"]
-os.environ["GOOGLE_API_KEY"] = st.secrets["GOOGLE_API_KEY"]
-os.environ["GOOGLE_CSE_ID"] = st.secrets["GOOGLE_CSE_ID"]
+st.set_page_config(page_title="SCWGL Chatbot", page_icon="⚽", layout="wide")
+st.title("⚽ SCWGL Football")
+st.markdown("### 💬 Chat with SCWGL Assistant")
 
 # ---------------------------------------------------------------------
-# 🎨 Header
+# 📚 SCWGL Context
 # ---------------------------------------------------------------------
-col1, col2, col3 = st.columns([1, 3, 1])
-with col1:
-    st.image("scwgl_image.jpeg", width=60)
-with col2:
-    st.markdown(
-        "<h1 style='color: red; text-align: center;'>SCWGL Football</h1>",
-        unsafe_allow_html=True,
-    )
-with col3:
-    st.image("walton_hersham_logo.png", width=60)
-
-st.markdown("---")
-
-# ---------------------------------------------------------------------
-# 📚 Sidebar: Upload PDFs
-# ---------------------------------------------------------------------
-with st.sidebar:
-    st.title("📄 Your Documents")
-    files = st.file_uploader(
-        "Upload PDF files",
-        type="pdf",
-        accept_multiple_files=True,
-    )
-
-# Auto-load PDFs from folder
-pdf_folder = "pdfs"
-if os.path.exists(pdf_folder):
-    for filename in os.listdir(pdf_folder):
-        if filename.endswith(".pdf"):
-            files = files + [os.path.join(pdf_folder, filename)] if files else [os.path.join(pdf_folder, filename)]
-
-# ---------------------------------------------------------------------
-# 💬 Session State Initialization
-# ---------------------------------------------------------------------
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-if "vector_store" not in st.session_state:
-    st.session_state.vector_store = None
-
-if "user_input" not in st.session_state:
-    st.session_state.user_input = ""
-
-# ---------------------------------------------------------------------
-# 📖 Extract PDF Text
-# ---------------------------------------------------------------------
-text = ""
-if files:
-    for file in files:
-        try:
-            pdf_reader = PdfReader(file)
-            for page in pdf_reader.pages:
-                text += (page.extract_text() or "") + "\n"
-        except Exception as e:
-            st.warning(f"Could not read {file}: {e}")
-
-# ---------------------------------------------------------------------
-# 🧭 SCWGL Context
-# ---------------------------------------------------------------------
-scwgl_context = """
-The Surrey County Women and Girls Football League (SCWGL) manages women's and girls' football leagues in Surrey, UK.
-It provides fixtures, regulations, and guidance for teams and clubs.
-Questions should be answered in this SCWGL context.
+SCWGL_CONTEXT = """
+You are an assistant for the Surrey County Women and Girls Football League (SCWGL). 
+Answer all questions in the context of SCWGL, focusing on girls’ football teams, age groups, fixtures, league rules, ball sizes, match formats, and policies. 
+If you don't know the answer, respond with "I don't know, but here is a helpful guess in context."
 """
 
 # ---------------------------------------------------------------------
-# 🧩 Vector Store (FAISS)
+# 📚 Session State Initialization
 # ---------------------------------------------------------------------
-if text and not st.session_state.vector_store:
-    with st.spinner("📚 Indexing your documents..."):
-        splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
-        chunks = splitter.split_text(scwgl_context + "\n" + text)
+for key in ["messages", "user_input", "vector_store", "qa_chain", "llm", "google_search"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
 
-        embeddings = OpenAIEmbeddings(openai_api_key=OPENAI_API_KEY)
-        st.session_state.vector_store = FAISS.from_texts(chunks, embeddings)
-        st.success("✅ Documents indexed!")
+if st.session_state.messages is None:
+    st.session_state.messages = []
 
-# ---------------------------------------------------------------------
-# 🧠 LLM & Google Search
-# ---------------------------------------------------------------------
-llm = ChatOpenAI(
-    openai_api_key=OPENAI_API_KEY,
-    model_name="gpt-4o-mini",
-    temperature=0.2,
-)
-
-memory = ConversationBufferWindowMemory(k=5)
-google_search = GoogleSearchAPIWrapper()
-
-# ---------------------------------------------------------------------
-# 🔍 RetrievalQA Chain
-# ---------------------------------------------------------------------
-qa_chain = None
-if st.session_state.vector_store:
-    retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 3})
-    qa_chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, chain_type="stuff")
-
-# ---------------------------------------------------------------------
-# 💬 Callback for user input
-# ---------------------------------------------------------------------
-def handle_user_input():
-    # Append user message immediately
-    st.session_state.messages.append({"role": "user", "content": st.session_state.user_input})
-
-    # Generate assistant response
-    response = None
-    if qa_chain:
-        local_answer = qa_chain.run(st.session_state.user_input)
-        if local_answer and "no relevant" not in local_answer.lower():
-            response = local_answer
-
-    # Fallback to Google search
-    if not response:
-        try:
-            response = google_search.run(st.session_state.user_input)
-        except Exception as e:
-            response = f"Web search failed: {e}"
-
-    st.session_state.messages.append({"role": "assistant", "content": response})
-
-    # Clear input box
+if st.session_state.user_input is None:
     st.session_state.user_input = ""
 
 # ---------------------------------------------------------------------
-# 💬 Chat Interface (Mobile-friendly)
+# 🔹 Load PDFs and Create Vectorstore (cached)
 # ---------------------------------------------------------------------
-st.markdown("### 💬 Chat with SCWGL Assistant")
+@st.cache_resource
+def load_vectorstore(pdf_folder: str):
+    path = Path(pdf_folder)
+    if not path.exists():
+        return None
+    loader = PyPDFDirectoryLoader(pdf_folder)
+    documents = loader.load()
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    vector_store = FAISS.from_documents(documents, embeddings)
+    return vector_store
 
-# Display previous messages
+if not st.session_state.vector_store:
+    st.session_state.vector_store = load_vectorstore("pdfs")
+
+# ---------------------------------------------------------------------
+# 🔹 Initialize LLMs and Chains
+# ---------------------------------------------------------------------
+if not st.session_state.llm:
+    st.session_state.llm = ChatOpenAI(
+        model="gpt-4o-mini",
+        temperature=0,
+        openai_api_key=st.secrets["OPENAI_API_KEY"]
+    )
+
+if st.session_state.vector_store and not st.session_state.qa_chain:
+    retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 3})
+    st.session_state.qa_chain = ConversationalRetrievalChain.from_llm(
+        llm=st.session_state.llm,
+        retriever=retriever,
+        return_source_documents=False
+    )
+
+if not st.session_state.google_search:
+    st.session_state.google_search = GoogleSerperAPIWrapper(
+        serper_api_key=st.secrets["SERPER_API_KEY"]
+    )
+
+# ---------------------------------------------------------------------
+# 🔹 Helper: Format chat history for LangChain
+# ---------------------------------------------------------------------
+def format_chat_history(messages):
+    history = []
+    user_msg = None
+    for msg in messages:
+        if msg["role"] == "user":
+            user_msg = msg["content"]
+        elif msg["role"] == "assistant" and user_msg:
+            history.append((user_msg, msg["content"]))
+            user_msg = None
+    return history
+
+# ---------------------------------------------------------------------
+# 🔹 Handle User Input
+# ---------------------------------------------------------------------
+def handle_user_input():
+    user_text = st.session_state.user_input.strip()
+    if not user_text:
+        return
+
+    # 1️⃣ Save user message
+    st.session_state.messages.append({"role": "user", "content": user_text})
+    response_text = None
+    source = None
+
+    # 2️⃣ Step 1: PDF QA
+    if st.session_state.qa_chain:
+        try:
+            pdf_result = st.session_state.qa_chain.invoke({
+                "question": user_text,
+                "chat_history": format_chat_history(st.session_state.messages)
+            })
+            pdf_answer = pdf_result.get("answer") if isinstance(pdf_result, dict) else str(pdf_result)
+            if pdf_answer and "No relevant documents" not in pdf_answer:
+                response_text = pdf_answer
+                source = "PDF"
+        except Exception as e:
+            st.warning(f"PDF QA failed: {e}")
+
+    # 3️⃣ Step 2: Google fallback
+    if not response_text or response_text.lower().strip() in ["", "i don't know."]:
+        try:
+            google_query = f"{SCWGL_CONTEXT}\n\n{user_text}"
+            google_result = st.session_state.google_search.run(google_query)
+            if google_result and len(google_result.strip()) > 20:
+                response_text = google_result
+                source = "Google"
+        except Exception as e:
+            st.warning(f"Google Search failed: {e}")
+
+    # 4️⃣ Step 3: LLM fallback
+    if not response_text or response_text.lower().strip() in ["", "i don't know."]:
+        try:
+            llm_prompt = f"{SCWGL_CONTEXT}\n\nUser question: {user_text}"
+            llm_result = st.session_state.llm.invoke(llm_prompt)
+            response_text = llm_result.content if hasattr(llm_result, "content") else str(llm_result)
+            source = "LLM"
+        except Exception as e:
+            response_text = f"LLM failed: {e}"
+            source = "Error"
+
+    # 5️⃣ Save assistant message with source info
+    st.session_state.messages.append({
+        "role": "assistant",
+        "content": f"{response_text}\n\n_Source: {source}_"
+    })
+
+    st.session_state.user_input = ""
+
+# ---------------------------------------------------------------------
+# 🔹 Display chat messages
+# ---------------------------------------------------------------------
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
 
-# Input box with callback
-st.text_input(
-    "Ask your question...",
-    key="user_input",
-    on_change=handle_user_input
-)
+# ---------------------------------------------------------------------
+# 🔹 Input box
+# ---------------------------------------------------------------------
+st.text_input("Ask your question...", key="user_input", on_change=handle_user_input)
