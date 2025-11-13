@@ -2,7 +2,6 @@
 langchain
 langchain-openai
 langchain-community
-langchain-chains
 
 # PDF handling
 pypdf
