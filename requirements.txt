@@ -3,8 +3,9 @@ PyPDF2
 python-dotenv
 requests
 faiss-cpu
-langchain==0.3.27
-langchain-openai==0.3.35
+langchain
+langchain-openai
 langchain-text-splitters==0.3.11
 beautifulsoup4
 openai
+langchain-community
