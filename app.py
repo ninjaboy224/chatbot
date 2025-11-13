@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 from langchain_community.utilities import GoogleSerperAPIWrapper
 
 # ---------------------------------------------------------------------
-# ⚙️ Streamlit Page Setup
+# ⚙️ Streamlit Setup
 # ---------------------------------------------------------------------
 st.set_page_config(page_title="SCWGL Chatbot", page_icon="⚽", layout="wide")
 st.title("⚽ SCWGL Football")
@@ -21,19 +21,18 @@ st.markdown("### 💬 Chat with SCWGL Assistant")
 # ---------------------------------------------------------------------
 SCWGL_CONTEXT = """
 You are an assistant for the Surrey County Women and Girls Football League (SCWGL). 
-Answer all questions in the context of SCWGL, focusing on girls’ football teams, age groups, fixtures, league rules, ball sizes, match formats, and policies. 
-If you don't know the answer, respond with "I don't know, but here is a helpful guess in context."
+Answer all questions in the context of SCWGL, focusing on girls’ football teams, age groups, fixtures, league rules, ball sizes, match formats, and policies.
 """
 
 # ---------------------------------------------------------------------
 # 📚 Session State Initialization
 # ---------------------------------------------------------------------
-for key in ["messages", "user_input", "vector_store", "qa_chain", "llm", "google_search"]:
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for key in ["user_input", "vector_store", "qa_chain", "llm", "google_search"]:
     if key not in st.session_state:
         st.session_state[key] = None
-
-if st.session_state.messages is None:
-    st.session_state.messages = []
 
 if st.session_state.user_input is None:
     st.session_state.user_input = ""
@@ -70,7 +69,7 @@ if st.session_state.vector_store and not st.session_state.qa_chain:
     st.session_state.qa_chain = ConversationalRetrievalChain.from_llm(
         llm=st.session_state.llm,
         retriever=retriever,
-        return_source_documents=True  # Important for source labeling
+        return_source_documents=True
     )
 
 if not st.session_state.google_search:
@@ -79,7 +78,7 @@ if not st.session_state.google_search:
     )
 
 # ---------------------------------------------------------------------
-# 🔹 Helper: Format chat history for LangChain
+# 🔹 Format chat history
 # ---------------------------------------------------------------------
 def format_chat_history(messages):
     history = []
@@ -93,14 +92,13 @@ def format_chat_history(messages):
     return history
 
 # ---------------------------------------------------------------------
-# 🔹 Handle User Input
+# 🔹 Handle user input
 # ---------------------------------------------------------------------
 def handle_user_input():
     user_text = st.session_state.user_input.strip()
     if not user_text:
         return
 
-    # Save user message
     st.session_state.messages.append({"role": "user", "content": user_text})
     response_text = None
     source = None
@@ -115,14 +113,13 @@ def handle_user_input():
             pdf_answer = pdf_result.get("answer") if isinstance(pdf_result, dict) else str(pdf_result)
             sources = pdf_result.get("source_documents") if isinstance(pdf_result, dict) else []
 
-            # Only use PDF if sources exist AND answer is meaningful
             if sources and pdf_answer.strip() and "I don't know" not in pdf_answer:
                 response_text = pdf_answer
                 source = "PDF"
         except Exception as e:
             st.warning(f"PDF QA failed: {e}")
 
-    # Step 2: Google fallback ONLY if PDF found no meaningful answer
+    # Step 2: Google fallback
     if not response_text:
         try:
             google_query = f"{SCWGL_CONTEXT}\n\nUser question: {user_text} site:scwgl.org.uk"
@@ -147,7 +144,6 @@ def handle_user_input():
             response_text = f"LLM failed: {e}"
             source = "Error"
 
-    # Append assistant response
     st.session_state.messages.append({
         "role": "assistant",
         "content": f"{response_text}\n\n_Source: {source}_"
