@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 # LangChain >=0.3.x imports
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain_community.chains import RetrievalQA
+from langchain.chains.retrieval_qa.base import RetrievalQA
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.memory import ConversationBufferWindowMemory
 from langchain_community.vectorstores import FAISS
