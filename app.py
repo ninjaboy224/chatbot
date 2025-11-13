@@ -70,7 +70,7 @@ if st.session_state.vector_store and not st.session_state.qa_chain:
     st.session_state.qa_chain = ConversationalRetrievalChain.from_llm(
         llm=st.session_state.llm,
         retriever=retriever,
-        return_source_documents=False
+        return_source_documents=True  # Important for source labeling
     )
 
 if not st.session_state.google_search:
@@ -100,12 +100,12 @@ def handle_user_input():
     if not user_text:
         return
 
-    # 1️⃣ Save user message
+    # Save user message
     st.session_state.messages.append({"role": "user", "content": user_text})
     response_text = None
     source = None
 
-    # 2️⃣ Step 1: PDF QA
+    # Step 1: PDF QA
     if st.session_state.qa_chain:
         try:
             pdf_result = st.session_state.qa_chain.invoke({
@@ -113,25 +113,31 @@ def handle_user_input():
                 "chat_history": format_chat_history(st.session_state.messages)
             })
             pdf_answer = pdf_result.get("answer") if isinstance(pdf_result, dict) else str(pdf_result)
-            if pdf_answer and "No relevant documents" not in pdf_answer:
+            sources = pdf_result.get("source_documents") if isinstance(pdf_result, dict) else []
+
+            # Only use PDF if sources exist AND answer is meaningful
+            if sources and pdf_answer.strip() and "I don't know" not in pdf_answer:
                 response_text = pdf_answer
                 source = "PDF"
         except Exception as e:
             st.warning(f"PDF QA failed: {e}")
 
-    # 3️⃣ Step 2: Google fallback
-    if not response_text or response_text.lower().strip() in ["", "i don't know."]:
+    # Step 2: Google fallback ONLY if PDF found no meaningful answer
+    if not response_text:
         try:
-            google_query = f"{SCWGL_CONTEXT}\n\n{user_text}"
+            google_query = f"{SCWGL_CONTEXT}\n\nUser question: {user_text} site:scwgl.org.uk"
             google_result = st.session_state.google_search.run(google_query)
-            if google_result and len(google_result.strip()) > 20:
+            if google_result and google_result.strip():
                 response_text = google_result
-                source = "Google"
+                source = "Google (SCWGL site)"
+            else:
+                response_text = "No good Google Search Result was found."
+                source = "Google (SCWGL site)"
         except Exception as e:
             st.warning(f"Google Search failed: {e}")
 
-    # 4️⃣ Step 3: LLM fallback
-    if not response_text or response_text.lower().strip() in ["", "i don't know."]:
+    # Step 3: LLM fallback
+    if not response_text:
         try:
             llm_prompt = f"{SCWGL_CONTEXT}\n\nUser question: {user_text}"
             llm_result = st.session_state.llm.invoke(llm_prompt)
@@ -141,7 +147,7 @@ def handle_user_input():
             response_text = f"LLM failed: {e}"
             source = "Error"
 
-    # 5️⃣ Save assistant message with source info
+    # Append assistant response
     st.session_state.messages.append({
         "role": "assistant",
         "content": f"{response_text}\n\n_Source: {source}_"
