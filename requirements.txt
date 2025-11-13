@@ -1,24 +1,24 @@
 # Core LangChain
-langchain>=0.3.0
-langchain-openai>=0.2.0
-langchain-community>=0.2.0
+langchain
+langchain-openai
+langchain-community
 
 # PDF handling
-pypdf>=3.17.0
+pypdf
 
 # Vector search
-faiss-cpu>=1.8.0
+faiss-cpu
 
 # Streamlit
-streamlit>=1.38.0
+streamlit
 
 # Google fallback search via Serper
-langchain-google-serper>=0.0.3
-google-search-results>=2.4.2
+langchain-google-serper
+google-search-results
 
 # Environment variables & secrets
-python-dotenv>=1.0.1
-toml>=0.10.2
+python-dotenv
+toml
 
 # Optional: better token handling
-tiktoken>=0.7.0
+tiktoken
