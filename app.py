@@ -3,11 +3,12 @@ import os
 from PyPDF2 import PdfReader
 from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain.memory import ConversationBufferWindowMemory
 from langchain.chains import RetrievalQA
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain.vectorstores.faiss import FAISS
 from langchain.utilities import GoogleSearchAPIWrapper
+from langchain_community.vectorstores import FAISS
+from langchain_community.chat_message_histories import StreamlitChatMessageHistory
+from langchain.memory import ConversationBufferWindowMemory
 
 # ---------------------------------------------------------------------
 # ⚙️ Setup and Environment
