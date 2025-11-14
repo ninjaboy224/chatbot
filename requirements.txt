@@ -21,3 +21,5 @@ toml>=0.10.2
 
 # Token helpers (optional but helpful)
 tiktoken>=0.7.0
+
+sentence-transformers
