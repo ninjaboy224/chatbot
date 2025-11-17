@@ -1,6 +1,7 @@
 import streamlit as st
 from pathlib import Path
 import json
+import re
 
 # LangChain imports
 from langchain_community.document_loaders import PyPDFDirectoryLoader
@@ -8,6 +9,15 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_openai import ChatOpenAI
 from langchain_community.utilities import GoogleSerperAPIWrapper
+
+# ---------------------------------------------------------------------
+# ⚙️ DEBUG FLAG
+# ---------------------------------------------------------------------
+DEBUG = False  # Set to False to hide debug messages
+
+def debug(msg):
+    if DEBUG:
+        st.write(f"DEBUG: {msg}")
 
 # ---------------------------------------------------------------------
 # ⚙️ Streamlit Setup
@@ -57,13 +67,11 @@ if not st.session_state.vector_store:
 # Optionally upload more PDFs
 uploaded_files = st.file_uploader("Upload additional PDF(s)", type=["pdf"], accept_multiple_files=True)
 if uploaded_files:
-    # Save uploaded PDFs to `pdfs/` folder
     pdf_dir = Path("pdfs")
     pdf_dir.mkdir(exist_ok=True)
     for file in uploaded_files:
         with open(pdf_dir / file.name, "wb") as f:
             f.write(file.getbuffer())
-    # Reload vector store
     st.session_state.vector_store = load_vectorstore("pdfs")
     st.success(f"{len(uploaded_files)} PDF(s) uploaded and indexed!")
 
@@ -86,14 +94,12 @@ if not st.session_state.google_search:
 # 🗂 Helpers
 # ---------------------------------------------------------------------
 def format_chat_history(messages):
-    """Return chat history as string for LLM input."""
     return "\n".join([
         f"User: {msg['content']}" if msg["role"]=="user" else f"Assistant: {msg['content']}"
         for msg in messages
     ])
 
 def extract_text_from_result(res):
-    """Normalise outputs from .invoke() / .run() into a string safely."""
     if res is None:
         return ""
     if isinstance(res, dict):
@@ -113,7 +119,7 @@ def extract_text_from_result(res):
     return str(res)
 
 # ---------------------------------------------------------------------
-# 🧠 Handle User Input
+# 🧠 Handle User Input with Logging
 # ---------------------------------------------------------------------
 def handle_user_input():
     user_text = st.session_state.user_input.strip()
@@ -127,31 +133,45 @@ def handle_user_input():
     # Step 1: PDF-first retrieval
     if st.session_state.vector_store:
         try:
+            debug("Attempting PDF retrieval...")
             retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 3})
             docs = retriever.get_relevant_documents(user_text)
+            debug(f"Number of PDF docs retrieved: {len(docs)}")
+
             if docs:
-                retrieved_text = "\n\n".join([d.page_content for d in docs])
+                retrieved_text = "\n\n".join([d.page_content for d in docs if getattr(d, "page_content", None)])
+                debug(f"Retrieved PDF text length: {len(retrieved_text)}")
+
                 history_text = format_chat_history(st.session_state.messages)
                 llm_input = (
                     f"{SCWGL_CONTEXT}\n\n"
                     f"Chat history:\n{history_text}\n\n"
-                    f"Retrieved PDF content:\n{retrieved_text}\n\n"
-                    f"Question: {user_text}\nAnswer concisely:"
+                    f"Relevant PDF extracts:\n{retrieved_text}\n\n"
+                    "ONLY use the PDF extracts above to answer. If the extracts do not contain the answer, "
+                    "reply exactly with: I DON'T KNOW.\n\n"
+                    f"Question: {user_text}\nAnswer:"
                 )
-                pdf_answer_obj = st.session_state.llm.invoke(llm_input)
-                pdf_answer = extract_text_from_result(pdf_answer_obj).strip()
+                raw_pdf_answer = st.session_state.llm.invoke(llm_input)
+                pdf_answer = extract_text_from_result(raw_pdf_answer).strip()
+                debug(f"PDF LLM answer: {pdf_answer}")
+
                 if pdf_answer and "i don't know" not in pdf_answer.lower():
                     response_text = pdf_answer
                     source = "PDF"
+                else:
+                    debug("PDF did not contain answer → fallback to Google")
         except Exception as e:
             st.warning(f"PDF QA failed: {e}")
 
     # Step 2: Google fallback → LLM summarization
     if not response_text:
         try:
+            debug("Attempting Google search...")
             google_query = f"{SCWGL_CONTEXT}\n\nUser question: {user_text} site:scwgl.org.uk"
             raw_google = st.session_state.google_search.run(google_query)
             raw_google_text = extract_text_from_result(raw_google).strip()
+            debug(f"Google raw text length: {len(raw_google_text)}")
+
             if raw_google_text:
                 llm_summary_prompt = (
                     f"{SCWGL_CONTEXT}\n\n"
@@ -160,6 +180,8 @@ def handle_user_input():
                 )
                 raw_llm_sum = st.session_state.llm.invoke(llm_summary_prompt)
                 llm_summary = extract_text_from_result(raw_llm_sum).strip()
+                debug(f"LLM summary of Google results: {llm_summary}")
+
                 if llm_summary:
                     response_text = llm_summary
                     source = "Google → LLM Summary"
@@ -175,6 +197,7 @@ def handle_user_input():
     # Step 3: LLM fallback
     if not response_text:
         try:
+            debug("Using direct LLM fallback...")
             llm_prompt = f"{SCWGL_CONTEXT}\n\nUser question: {user_text}"
             raw_llm = st.session_state.llm.invoke(llm_prompt)
             response_text = extract_text_from_result(raw_llm).strip()
